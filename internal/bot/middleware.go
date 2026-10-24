@@ -42,6 +42,16 @@ func (b *Bot) loggingMiddleware(next tgbot.HandlerFunc) tgbot.HandlerFunc {
 			if update.Message.From != nil {
 				attrs = append(attrs, slog.Int64("user_id", update.Message.From.ID))
 			}
+		} else if update.CallbackQuery != nil {
+			attrs = append(attrs,
+				slog.String("callback_data", update.CallbackQuery.Data),
+				slog.Int64("user_id", update.CallbackQuery.From.ID),
+			)
+		} else if update.InlineQuery != nil {
+			attrs = append(attrs,
+				slog.String("inline_query", update.InlineQuery.Query),
+				slog.Int64("user_id", update.InlineQuery.From.ID),
+			)
 		}
 
 		b.logger.InfoContext(ctx, "processed telegram update", attrs...)

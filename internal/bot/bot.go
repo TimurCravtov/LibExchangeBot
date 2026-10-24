@@ -55,8 +55,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*Bot, error) {
 func (b *Bot) Start(ctx context.Context) error {
 	if _, err := b.client.SetMyCommands(ctx, &tgbot.SetMyCommandsParams{
 		Commands: []models.BotCommand{
-			{Command: "start", Description: "Start the bot"},
-			{Command: "help", Description: "Show help information"},
+			{Command: "start", Description: "Главное меню"},
+			{Command: "help", Description: "Помощь"},
 		},
 	}); err != nil {
 		b.logger.WarnContext(ctx, "failed to set bot commands", slog.Any("error", err))
@@ -71,4 +71,17 @@ func (b *Bot) Start(ctx context.Context) error {
 func (b *Bot) registerHandlers() {
 	b.client.RegisterHandler(tgbot.HandlerTypeMessageText, "/start", tgbot.MatchTypeExact, b.handleStart)
 	b.client.RegisterHandler(tgbot.HandlerTypeMessageText, "/help", tgbot.MatchTypeExact, b.handleHelp)
+
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackMainMenu, tgbot.MatchTypeExact, b.handleMainMenuCallback)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackViewLibrary, tgbot.MatchTypeExact, b.handleViewLibrary)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackSuggestBook, tgbot.MatchTypeExact, b.handleSuggestBook)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackAdminPanel, tgbot.MatchTypeExact, b.handleAdminPanel)
+
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibGenres, tgbot.MatchTypeExact, b.handleLibGenres)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibGenre, tgbot.MatchTypePrefix, b.handleLibGenreSelect)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibSubgenre, tgbot.MatchTypePrefix, b.handleLibSubgenreSelect)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibRecent, tgbot.MatchTypeExact, b.handleLibRecent)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibAuthors, tgbot.MatchTypeExact, b.handleLibAuthors)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibPopular, tgbot.MatchTypeExact, b.handleLibPopular)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibAvailable, tgbot.MatchTypeExact, b.handleLibAvailable)
 }
