@@ -155,12 +155,13 @@ func libraryMenuKeyboard() *models.InlineKeyboardMarkup {
 	}
 }
 
-func genresKeyboard() *models.InlineKeyboardMarkup {
+func (b *Bot) genresKeyboard() *models.InlineKeyboardMarkup {
 	rows := make([][]models.InlineKeyboardButton, 0, len(libraryGenres)+1)
 	for _, g := range libraryGenres {
+		count := len(b.store.ByGenre(g.ID))
 		rows = append(rows, []models.InlineKeyboardButton{
 			{
-				Text:         g.Title,
+				Text:         fmt.Sprintf("%s (%d)", g.Title, count),
 				CallbackData: prefixLibGenre + g.ID,
 			},
 		})
@@ -171,20 +172,22 @@ func genresKeyboard() *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func subgenresKeyboard(genre Genre) *models.InlineKeyboardMarkup {
+func (b *Bot) subgenresKeyboard(genre Genre) *models.InlineKeyboardMarkup {
 	rows := make([][]models.InlineKeyboardButton, 0, len(genre.Subgenres)+2)
 	for _, sg := range genre.Subgenres {
+		count := len(b.store.BySubgenre(genre.ID, sg.ID))
 		rows = append(rows, []models.InlineKeyboardButton{
 			{
-				Text:         sg.Title,
+				Text:         fmt.Sprintf("%s (%d)", sg.Title, count),
 				CallbackData: fmt.Sprintf("%s%s:%s:0", prefixLibSubgenre, genre.ID, sg.ID),
 			},
 		})
 	}
+	genreTotal := len(b.store.ByGenre(genre.ID))
 	rows = append(rows,
 		[]models.InlineKeyboardButton{
 			{
-				Text:         "📚 Все книги жанра",
+				Text:         fmt.Sprintf("📚 Все книги жанра (%d)", genreTotal),
 				CallbackData: fmt.Sprintf("%s%s:all:0", prefixLibSubgenre, genre.ID),
 			},
 		},
@@ -366,7 +369,7 @@ func (b *Bot) handleLibGenres(ctx context.Context, client *tgbot.Bot, update *mo
 		client,
 		update,
 		"🎭 Выберите жанр:",
-		genresKeyboard(),
+		b.genresKeyboard(),
 	)
 }
 
@@ -377,12 +380,13 @@ func (b *Bot) handleLibGenreSelect(ctx context.Context, client *tgbot.Bot, updat
 	genreID := strings.TrimPrefix(update.CallbackQuery.Data, prefixLibGenre)
 	genre, ok := findGenre(genreID)
 	if !ok {
-		b.respondOrEditCallback(ctx, client, update, "Жанр не найден.", genresKeyboard())
+		b.respondOrEditCallback(ctx, client, update, "Жанр не найден.", b.genresKeyboard())
 		return
 	}
 
-	text := fmt.Sprintf("%s\n\nВыберите поджанр:", genre.Title)
-	b.respondOrEditCallback(ctx, client, update, text, subgenresKeyboard(genre))
+	genreCount := len(b.store.ByGenre(genre.ID))
+	text := fmt.Sprintf("%s (%d)\n\nВыберите поджанр:", genre.Title, genreCount)
+	b.respondOrEditCallback(ctx, client, update, text, b.subgenresKeyboard(genre))
 }
 
 func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, update *models.Update) {
@@ -392,7 +396,7 @@ func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, up
 	payload := strings.TrimPrefix(update.CallbackQuery.Data, prefixLibSubgenre)
 	parts := strings.Split(payload, ":")
 	if len(parts) < 2 {
-		b.respondOrEditCallback(ctx, client, update, "Некорректный выбор категории.", genresKeyboard())
+		b.respondOrEditCallback(ctx, client, update, "Некорректный выбор категории.", b.genresKeyboard())
 		return
 	}
 
@@ -406,12 +410,11 @@ func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, up
 
 	genre, ok := findGenre(genreID)
 	if !ok {
-		b.respondOrEditCallback(ctx, client, update, "Жанр не найден.", genresKeyboard())
+		b.respondOrEditCallback(ctx, client, update, "Жанр не найден.", b.genresKeyboard())
 		return
 	}
 
-	pagePrefix := fmt.Sprintf("%s%s:%s", strings.TrimSuffix(prefixLibSubgenre, ":"), genre.ID, subID)
-	pagePrefix = prefixLibSubgenre + genre.ID + ":" + subID
+	pagePrefix := prefixLibSubgenre + genre.ID + ":" + subID
 
 	if subID == "all" {
 		books := b.store.ByGenre(genre.ID)
@@ -432,7 +435,7 @@ func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, up
 
 	subgenre, ok := findSubgenre(genre, subID)
 	if !ok {
-		b.respondOrEditCallback(ctx, client, update, "Поджанр не найден.", subgenresKeyboard(genre))
+		b.respondOrEditCallback(ctx, client, update, "Поджанр не найден.", b.subgenresKeyboard(genre))
 		return
 	}
 

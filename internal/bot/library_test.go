@@ -2,10 +2,34 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"libexchangebot/internal/model"
+	"libexchangebot/internal/storage"
 )
+
+func TestGenresAndSubgenresCountLabels(t *testing.T) {
+	b := &Bot{store: storage.NewMemoryStore()}
+
+	genresKB := b.genresKeyboard()
+	if len(genresKB.InlineKeyboard) == 0 {
+		t.Fatal("expected non-empty genres keyboard")
+	}
+	firstGenreText := genresKB.InlineKeyboard[0][0].Text
+	if !strings.HasSuffix(firstGenreText, "(3)") {
+		t.Errorf("expected fiction genre button to end with '(3)', got %q", firstGenreText)
+	}
+
+	fiction, ok := findGenre("fiction")
+	if !ok {
+		t.Fatal("fiction genre not found")
+	}
+	subKB := b.subgenresKeyboard(fiction)
+	if !strings.HasSuffix(subKB.InlineKeyboard[0][0].Text, "(2)") {
+		t.Errorf("expected sci_fi subgenre button to end with '(2)', got %q", subKB.InlineKeyboard[0][0].Text)
+	}
+}
 
 func TestPaginateBooks(t *testing.T) {
 	books := make([]model.Book, 8)
