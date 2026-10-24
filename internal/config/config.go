@@ -2,9 +2,12 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds the application configuration.
@@ -14,8 +17,13 @@ type Config struct {
 	Debug         bool
 }
 
-// Load reads configuration from environment variables.
+// Load reads .env (overriding existing environment variables if present)
+// and populates Config from environment variables.
 func Load() (*Config, error) {
+	if err := godotenv.Overload(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("load .env file: %w", err)
+	}
+
 	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	if token == "" {
 		return nil, errors.New("TELEGRAM_BOT_TOKEN environment variable is required")
