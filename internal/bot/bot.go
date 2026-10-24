@@ -9,17 +9,20 @@ import (
 	"github.com/go-telegram/bot/models"
 
 	"libexchangebot/internal/config"
+	"libexchangebot/internal/storage"
 )
 
 // Bot wraps the Telegram bot client and application dependencies.
 type Bot struct {
 	client *tgbot.Bot
+	store  *storage.MemoryStore
 	logger *slog.Logger
 }
 
 // New creates and configures a new Telegram Bot instance.
 func New(cfg *config.Config, logger *slog.Logger) (*Bot, error) {
 	b := &Bot{
+		store:  storage.NewMemoryStore(),
 		logger: logger,
 	}
 
@@ -80,6 +83,8 @@ func (b *Bot) registerHandlers() {
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibGenres, tgbot.MatchTypeExact, b.handleLibGenres)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibGenre, tgbot.MatchTypePrefix, b.handleLibGenreSelect)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibSubgenre, tgbot.MatchTypePrefix, b.handleLibSubgenreSelect)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibBook, tgbot.MatchTypePrefix, b.handleLibBookSelect)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, prefixLibQueue, tgbot.MatchTypePrefix, b.handleLibJoinQueue)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibRecent, tgbot.MatchTypeExact, b.handleLibRecent)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibAuthors, tgbot.MatchTypeExact, b.handleLibAuthors)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibPopular, tgbot.MatchTypeExact, b.handleLibPopular)

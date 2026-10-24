@@ -136,6 +136,11 @@ func (b *Bot) respondOrEditCallback(
 }
 
 func (b *Bot) handleDefault(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.InlineQuery != nil {
+		b.handleInlineSearch(ctx, client, update.InlineQuery)
+		return
+	}
+
 	if update.Message == nil {
 		return
 	}
@@ -147,6 +152,35 @@ func (b *Bot) handleDefault(ctx context.Context, client *tgbot.Bot, update *mode
 	if err != nil {
 		b.logger.ErrorContext(ctx, "failed to send default response",
 			slog.Int64("chat_id", update.Message.Chat.ID),
+			slog.Any("error", err),
+		)
+	}
+}
+
+func (b *Bot) handleInlineSearch(ctx context.Context, client *tgbot.Bot, iq *models.InlineQuery) {
+	books := b.store.Search(iq.Query)
+	results := make([]models.InlineQueryResult, 0, len(books))
+
+	for _, bk := range books {
+		desc := bk.Author + " | ISBN: " + bk.ISBN + " | Владелец: " + bk.Owner
+		results = append(results, &models.InlineQueryResultArticle{
+			ID:          bk.ID,
+			Title:       bk.Title,
+			Description: desc,
+			InputMessageContent: &models.InputTextMessageContent{
+				MessageText: bk.FormatCard(),
+			},
+			ReplyMarkup: bookCardKeyboard(bk),
+		})
+	}
+
+	if _, err := client.AnswerInlineQuery(ctx, &tgbot.AnswerInlineQueryParams{
+		InlineQueryID: iq.ID,
+		Results:       results,
+		CacheTime:     1,
+	}); err != nil {
+		b.logger.ErrorContext(ctx, "failed to answer inline query",
+			slog.String("inline_query_id", iq.ID),
 			slog.Any("error", err),
 		)
 	}
