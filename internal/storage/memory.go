@@ -2,6 +2,7 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -285,6 +286,27 @@ func (s *MemoryStore) JoinQueue(bookID, userHandle string) (model.Book, error) {
 		return cloneBook(s.books[i]), nil
 	}
 	return model.Book{}, ErrBookNotFound
+}
+
+// AddBook adds a new book to the in-memory store and assigns it an ID and timestamp.
+func (s *MemoryStore) AddBook(book model.Book) model.Book {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	book.ID = fmt.Sprintf("%d", len(s.books)+1)
+	if book.AddedAt.IsZero() {
+		book.AddedAt = time.Now()
+	}
+	if book.Queue == nil {
+		book.Queue = []string{}
+	}
+	if book.GenreID == "" {
+		book.GenreID = "fiction"
+		book.SubgenreID = "modern"
+	}
+
+	s.books = append(s.books, cloneBook(book))
+	return cloneBook(book)
 }
 
 func cloneBook(b model.Book) model.Book {

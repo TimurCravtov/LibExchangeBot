@@ -40,6 +40,7 @@ func (b *Bot) handleStart(ctx context.Context, client *tgbot.Bot, update *models
 	if update.Message == nil {
 		return
 	}
+	b.clearSuggestSession(update.Message.Chat.ID)
 
 	_, err := client.SendMessage(ctx, &tgbot.SendMessageParams{
 		ChatID:      update.Message.Chat.ID,
@@ -55,6 +56,9 @@ func (b *Bot) handleStart(ctx context.Context, client *tgbot.Bot, update *models
 }
 
 func (b *Bot) handleMainMenuCallback(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.CallbackQuery != nil && update.CallbackQuery.Message.Message != nil {
+		b.clearSuggestSession(update.CallbackQuery.Message.Message.Chat.ID)
+	}
 	b.respondOrEditCallback(ctx, client, update, welcomeMessageText, mainMenuKeyboard())
 }
 
@@ -77,14 +81,6 @@ func (b *Bot) handleHelp(ctx context.Context, client *tgbot.Bot, update *models.
 			slog.Any("error", err),
 		)
 	}
-}
-
-func (b *Bot) handleSuggestBook(ctx context.Context, client *tgbot.Bot, update *models.Update) {
-	b.respondOrEditCallback(ctx, client, update, "📖 Раздел «Предложить книгу»", &models.InlineKeyboardMarkup{
-		InlineKeyboard: [][]models.InlineKeyboardButton{
-			{{Text: "⬅️ Главное меню", CallbackData: callbackMainMenu}},
-		},
-	})
 }
 
 func (b *Bot) handleAdminPanel(ctx context.Context, client *tgbot.Bot, update *models.Update) {
@@ -142,6 +138,10 @@ func (b *Bot) handleDefault(ctx context.Context, client *tgbot.Bot, update *mode
 	}
 
 	if update.Message == nil {
+		return
+	}
+
+	if b.tryHandleSuggestInput(ctx, client, update) {
 		return
 	}
 

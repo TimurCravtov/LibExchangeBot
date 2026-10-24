@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -14,16 +15,19 @@ import (
 
 // Bot wraps the Telegram bot client and application dependencies.
 type Bot struct {
-	client *tgbot.Bot
-	store  *storage.MemoryStore
-	logger *slog.Logger
+	client          *tgbot.Bot
+	store           *storage.MemoryStore
+	logger          *slog.Logger
+	suggestMu       sync.Mutex
+	suggestSessions map[int64]*suggestSession
 }
 
 // New creates and configures a new Telegram Bot instance.
 func New(cfg *config.Config, logger *slog.Logger) (*Bot, error) {
 	b := &Bot{
-		store:  storage.NewMemoryStore(),
-		logger: logger,
+		store:           storage.NewMemoryStore(),
+		logger:          logger,
+		suggestSessions: make(map[int64]*suggestSession),
 	}
 
 	opts := []tgbot.Option{
@@ -78,6 +82,7 @@ func (b *Bot) registerHandlers() {
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackMainMenu, tgbot.MatchTypeExact, b.handleMainMenuCallback)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackViewLibrary, tgbot.MatchTypeExact, b.handleViewLibrary)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackSuggestBook, tgbot.MatchTypeExact, b.handleSuggestBook)
+	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackSuggestCancel, tgbot.MatchTypeExact, b.handleSuggestCancel)
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackAdminPanel, tgbot.MatchTypeExact, b.handleAdminPanel)
 
 	b.client.RegisterHandler(tgbot.HandlerTypeCallbackQueryData, callbackLibGenres, tgbot.MatchTypeExact, b.handleLibGenres)

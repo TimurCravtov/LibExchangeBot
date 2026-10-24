@@ -4,7 +4,27 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"libexchangebot/internal/model"
 )
+
+func TestMemoryStore_AddBook(t *testing.T) {
+	s := NewMemoryStore()
+	before := len(s.All())
+
+	added := s.AddBook(model.Book{
+		Title:  "Новая книга",
+		Author: "Иван Иванов",
+		ISBN:   "978-5-00-000000-1",
+		Owner:  "@id7",
+	})
+	if added.ID == "" {
+		t.Fatal("expected generated book ID")
+	}
+	if len(s.All()) != before+1 {
+		t.Fatalf("expected %d books, got %d", before+1, len(s.All()))
+	}
+}
 
 func TestNewMemoryStore_MockBooks(t *testing.T) {
 	s := NewMemoryStore()
