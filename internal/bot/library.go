@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 
 	tgbot "github.com/go-telegram/bot"
@@ -15,8 +16,11 @@ import (
 )
 
 const (
+	booksPerPage = 3
+
 	callbackMainMenu     = "main_menu"
 	callbackLibGenres    = "lib_genres"
+	callbackLibAll       = "lib_all"
 	callbackLibRecent    = "lib_recent"
 	callbackLibAuthors   = "lib_authors"
 	callbackLibPopular   = "lib_popular"
@@ -26,6 +30,7 @@ const (
 	prefixLibSubgenre = "lib_subgenre:"
 	prefixLibBook     = "lib_book:"
 	prefixLibQueue    = "lib_queue:"
+	prefixLibNoop     = "lib_noop:"
 )
 
 // Subgenre represents a book subcategory within a genre.
@@ -128,6 +133,7 @@ func libraryMenuKeyboard() *models.InlineKeyboardMarkup {
 		InlineKeyboard: [][]models.InlineKeyboardButton{
 			{
 				{Text: "🎭 По жанрам", CallbackData: callbackLibGenres},
+				{Text: "📚 Все книги", CallbackData: callbackLibAll},
 			},
 			{
 				{Text: "🆕 Последние добавления", CallbackData: callbackLibRecent},
@@ -171,7 +177,7 @@ func subgenresKeyboard(genre Genre) *models.InlineKeyboardMarkup {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{
 				Text:         sg.Title,
-				CallbackData: fmt.Sprintf("%s%s:%s", prefixLibSubgenre, genre.ID, sg.ID),
+				CallbackData: fmt.Sprintf("%s%s:%s:0", prefixLibSubgenre, genre.ID, sg.ID),
 			},
 		})
 	}
@@ -179,7 +185,7 @@ func subgenresKeyboard(genre Genre) *models.InlineKeyboardMarkup {
 		[]models.InlineKeyboardButton{
 			{
 				Text:         "📚 Все книги жанра",
-				CallbackData: fmt.Sprintf("%s%s:all", prefixLibSubgenre, genre.ID),
+				CallbackData: fmt.Sprintf("%s%s:all:0", prefixLibSubgenre, genre.ID),
 			},
 		},
 		[]models.InlineKeyboardButton{
@@ -189,9 +195,41 @@ func subgenresKeyboard(genre Genre) *models.InlineKeyboardMarkup {
 	return &models.InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func booksListKeyboard(books []model.Book, backCallback, backLabel string) *models.InlineKeyboardMarkup {
-	rows := make([][]models.InlineKeyboardButton, 0, len(books)+2)
-	for _, bk := range books {
+func paginateBooks(books []model.Book, page, perPage int) (pageBooks []model.Book, curPage, totalPages, startIdx int) {
+	if perPage <= 0 {
+		perPage = booksPerPage
+	}
+	if len(books) == 0 {
+		return nil, 0, 1, 0
+	}
+
+	totalPages = (len(books) + perPage - 1) / perPage
+	curPage = page
+	if curPage < 0 {
+		curPage = 0
+	}
+	if curPage >= totalPages {
+		curPage = totalPages - 1
+	}
+
+	startIdx = curPage * perPage
+	endIdx := startIdx + perPage
+	if endIdx > len(books) {
+		endIdx = len(books)
+	}
+	return books[startIdx:endIdx], curPage, totalPages, startIdx
+}
+
+func paginatedBooksKeyboard(
+	pageBooks []model.Book,
+	curPage int,
+	totalPages int,
+	pageCallbackPrefix string,
+	backCallback string,
+	backLabel string,
+) *models.InlineKeyboardMarkup {
+	rows := make([][]models.InlineKeyboardButton, 0, len(pageBooks)+3)
+	for _, bk := range pageBooks {
 		statusIcon := "✅"
 		if !bk.IsAvailable() {
 			statusIcon = "⏳"
@@ -203,6 +241,32 @@ func booksListKeyboard(books []model.Book, backCallback, backLabel string) *mode
 			},
 		})
 	}
+
+	prevCallback := prefixLibNoop + "first"
+	if curPage > 0 {
+		prevCallback = fmt.Sprintf("%s:%d", pageCallbackPrefix, curPage-1)
+	}
+
+	nextCallback := prefixLibNoop + "last"
+	if curPage+1 < totalPages {
+		nextCallback = fmt.Sprintf("%s:%d", pageCallbackPrefix, curPage+1)
+	}
+
+	rows = append(rows, []models.InlineKeyboardButton{
+		{
+			Text:         "<",
+			CallbackData: prevCallback,
+		},
+		{
+			Text:         fmt.Sprintf("%d / %d", curPage+1, totalPages),
+			CallbackData: fmt.Sprintf("%spage:%d:%d", prefixLibNoop, curPage+1, totalPages),
+		},
+		{
+			Text:         ">",
+			CallbackData: nextCallback,
+		},
+	})
+
 	if backCallback != "" && backCallback != callbackViewLibrary {
 		rows = append(rows, []models.InlineKeyboardButton{
 			{Text: backLabel, CallbackData: backCallback},
@@ -237,24 +301,53 @@ func bookCardKeyboard(book model.Book) *models.InlineKeyboardMarkup {
 	}
 }
 
-func formatBooksSummary(header string, books []model.Book) string {
-	if len(books) == 0 {
+func formatBooksPage(header string, pageBooks []model.Book, startIdx, totalBooks, curPage, totalPages int) string {
+	if totalBooks == 0 {
 		return header + "\n\nСписок книг пока пуст."
 	}
 
 	var sb strings.Builder
-	sb.WriteString(header)
-	sb.WriteString("\n\n")
-	for i, bk := range books {
+	fmt.Fprintf(&sb, "%s (стр. %d из %d, всего: %d)\n\n", header, curPage+1, totalPages, totalBooks)
+	for i, bk := range pageBooks {
 		queueInfo := "свободна"
 		if len(bk.Queue) > 0 {
 			queueInfo = fmt.Sprintf("очередь: %s", strings.Join(bk.Queue, ", "))
 		}
 		fmt.Fprintf(&sb, "%d. «%s» — %s\n   ISBN: %s | Владелец: %s (%s)\n\n",
-			i+1, bk.Title, bk.Author, bk.ISBN, bk.Owner, queueInfo)
+			startIdx+i+1, bk.Title, bk.Author, bk.ISBN, bk.Owner, queueInfo)
 	}
 	sb.WriteString("Нажмите на книгу ниже для подробной информации или записи в очередь:")
 	return sb.String()
+}
+
+func (b *Bot) renderPaginatedBooks(
+	ctx context.Context,
+	client *tgbot.Bot,
+	update *models.Update,
+	header string,
+	books []model.Book,
+	page int,
+	pageCallbackPrefix string,
+	backCallback string,
+	backLabel string,
+) {
+	pageBooks, curPage, totalPages, startIdx := paginateBooks(books, page, booksPerPage)
+	text := formatBooksPage(header, pageBooks, startIdx, len(books), curPage, totalPages)
+	kb := paginatedBooksKeyboard(pageBooks, curPage, totalPages, pageCallbackPrefix, backCallback, backLabel)
+	b.respondOrEditCallback(ctx, client, update, text, kb)
+}
+
+func parsePageSuffix(data, prefix string) int {
+	rest := strings.TrimPrefix(data, prefix)
+	rest = strings.TrimPrefix(rest, ":")
+	if rest == "" {
+		return 0
+	}
+	page, err := strconv.Atoi(rest)
+	if err != nil || page < 0 {
+		return 0
+	}
+	return page
 }
 
 func (b *Bot) handleViewLibrary(ctx context.Context, client *tgbot.Bot, update *models.Update) {
@@ -297,28 +390,42 @@ func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, up
 		return
 	}
 	payload := strings.TrimPrefix(update.CallbackQuery.Data, prefixLibSubgenre)
-	parts := strings.SplitN(payload, ":", 2)
-	if len(parts) != 2 {
+	parts := strings.Split(payload, ":")
+	if len(parts) < 2 {
 		b.respondOrEditCallback(ctx, client, update, "Некорректный выбор категории.", genresKeyboard())
 		return
 	}
 
 	genreID, subID := parts[0], parts[1]
+	page := 0
+	if len(parts) >= 3 {
+		if p, err := strconv.Atoi(parts[2]); err == nil && p >= 0 {
+			page = p
+		}
+	}
+
 	genre, ok := findGenre(genreID)
 	if !ok {
 		b.respondOrEditCallback(ctx, client, update, "Жанр не найден.", genresKeyboard())
 		return
 	}
 
+	pagePrefix := fmt.Sprintf("%s%s:%s", strings.TrimSuffix(prefixLibSubgenre, ":"), genre.ID, subID)
+	pagePrefix = prefixLibSubgenre + genre.ID + ":" + subID
+
 	if subID == "all" {
 		books := b.store.ByGenre(genre.ID)
-		header := fmt.Sprintf("📚 Все книги в жанре «%s»:", genre.Title)
-		b.respondOrEditCallback(
+		header := fmt.Sprintf("📚 Все книги в жанре «%s»", genre.Title)
+		b.renderPaginatedBooks(
 			ctx,
 			client,
 			update,
-			formatBooksSummary(header, books),
-			booksListKeyboard(books, prefixLibGenre+genre.ID, "⬅️ Назад к поджанрам"),
+			header,
+			books,
+			page,
+			pagePrefix,
+			prefixLibGenre+genre.ID,
+			"⬅️ Назад к поджанрам",
 		)
 		return
 	}
@@ -331,13 +438,43 @@ func (b *Bot) handleLibSubgenreSelect(ctx context.Context, client *tgbot.Bot, up
 
 	books := b.store.BySubgenre(genre.ID, subgenre.ID)
 	header := fmt.Sprintf("%s → %s", genre.Title, subgenre.Title)
-	b.respondOrEditCallback(
+	b.renderPaginatedBooks(
 		ctx,
 		client,
 		update,
-		formatBooksSummary(header, books),
-		booksListKeyboard(books, prefixLibGenre+genre.ID, "⬅️ Назад к поджанрам"),
+		header,
+		books,
+		page,
+		pagePrefix,
+		prefixLibGenre+genre.ID,
+		"⬅️ Назад к поджанрам",
 	)
+}
+
+func (b *Bot) handleLibNoop(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+	reason := strings.TrimPrefix(update.CallbackQuery.Data, prefixLibNoop)
+	var text string
+	switch {
+	case reason == "first":
+		text = "Это первая страница"
+	case reason == "last":
+		text = "Это последняя страница"
+	case strings.HasPrefix(reason, "page:"):
+		parts := strings.Split(strings.TrimPrefix(reason, "page:"), ":")
+		if len(parts) == 2 {
+			text = fmt.Sprintf("Страница %s из %s", parts[0], parts[1])
+		}
+	}
+
+	if _, err := client.AnswerCallbackQuery(ctx, &tgbot.AnswerCallbackQueryParams{
+		CallbackQueryID: update.CallbackQuery.ID,
+		Text:            text,
+	}); err != nil {
+		b.logger.ErrorContext(ctx, "failed to answer noop callback", slog.Any("error", err))
+	}
 }
 
 func (b *Bot) handleLibBookSelect(ctx context.Context, client *tgbot.Bot, update *models.Update) {
@@ -395,48 +532,49 @@ func (b *Bot) handleLibJoinQueue(ctx context.Context, client *tgbot.Bot, update 
 	}
 }
 
+func (b *Bot) handleLibAll(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+	page := parsePageSuffix(update.CallbackQuery.Data, callbackLibAll)
+	books := b.store.All()
+	b.renderPaginatedBooks(ctx, client, update, "📚 Все книги библиотеки", books, page, callbackLibAll, "", "")
+}
+
 func (b *Bot) handleLibRecent(ctx context.Context, client *tgbot.Bot, update *models.Update) {
-	books := b.store.Recent(10)
-	b.respondOrEditCallback(
-		ctx,
-		client,
-		update,
-		formatBooksSummary("🆕 Последние добавленные книги:", books),
-		booksListKeyboard(books, "", ""),
-	)
+	if update.CallbackQuery == nil {
+		return
+	}
+	page := parsePageSuffix(update.CallbackQuery.Data, callbackLibRecent)
+	books := b.store.Recent(0)
+	b.renderPaginatedBooks(ctx, client, update, "🆕 Последние добавленные книги", books, page, callbackLibRecent, "", "")
 }
 
 func (b *Bot) handleLibAuthors(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+	page := parsePageSuffix(update.CallbackQuery.Data, callbackLibAuthors)
 	books := b.store.All()
-	b.respondOrEditCallback(
-		ctx,
-		client,
-		update,
-		formatBooksSummary("✍️ Книги по авторам:", books),
-		booksListKeyboard(books, "", ""),
-	)
+	b.renderPaginatedBooks(ctx, client, update, "✍️ Книги по авторам", books, page, callbackLibAuthors, "", "")
 }
 
 func (b *Bot) handleLibPopular(ctx context.Context, client *tgbot.Bot, update *models.Update) {
-	books := b.store.Popular(10)
-	b.respondOrEditCallback(
-		ctx,
-		client,
-		update,
-		formatBooksSummary("🔥 Популярные книги:", books),
-		booksListKeyboard(books, "", ""),
-	)
+	if update.CallbackQuery == nil {
+		return
+	}
+	page := parsePageSuffix(update.CallbackQuery.Data, callbackLibPopular)
+	books := b.store.Popular(0)
+	b.renderPaginatedBooks(ctx, client, update, "🔥 Популярные книги", books, page, callbackLibPopular, "", "")
 }
 
 func (b *Bot) handleLibAvailable(ctx context.Context, client *tgbot.Bot, update *models.Update) {
+	if update.CallbackQuery == nil {
+		return
+	}
+	page := parsePageSuffix(update.CallbackQuery.Data, callbackLibAvailable)
 	books := b.store.Available()
-	b.respondOrEditCallback(
-		ctx,
-		client,
-		update,
-		formatBooksSummary("✅ Книги, доступные к обмену (без очереди):", books),
-		booksListKeyboard(books, "", ""),
-	)
+	b.renderPaginatedBooks(ctx, client, update, "✅ Книги, доступные к обмену", books, page, callbackLibAvailable, "", "")
 }
 
 func formatUserHandle(u *models.User) string {
