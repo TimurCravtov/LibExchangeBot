@@ -522,15 +522,25 @@ func (b *Bot) handleLibJoinQueue(ctx context.Context, client *tgbot.Bot, update 
 		b.logger.ErrorContext(ctx, "failed to answer queue callback", slog.Any("error", ansErr))
 	}
 
-	if err == nil && update.CallbackQuery.Message.Message != nil {
-		msg := update.CallbackQuery.Message.Message
-		if _, editErr := client.EditMessageText(ctx, &tgbot.EditMessageTextParams{
-			ChatID:      msg.Chat.ID,
-			MessageID:   msg.ID,
-			Text:        book.FormatCard(),
-			ReplyMarkup: bookCardKeyboard(book),
-		}); editErr != nil {
-			b.logger.ErrorContext(ctx, "failed to update book card after joining queue", slog.Any("error", editErr))
+	if err == nil {
+		if update.CallbackQuery.InlineMessageID != "" {
+			if _, editErr := client.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+				InlineMessageID: update.CallbackQuery.InlineMessageID,
+				Text:            book.FormatCard(),
+				ReplyMarkup:     bookCardKeyboard(book),
+			}); editErr != nil && !strings.Contains(editErr.Error(), "message is not modified") {
+				b.logger.ErrorContext(ctx, "failed to update inline book card after joining queue", slog.Any("error", editErr))
+			}
+		} else if update.CallbackQuery.Message.Message != nil {
+			msg := update.CallbackQuery.Message.Message
+			if _, editErr := client.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+				ChatID:      msg.Chat.ID,
+				MessageID:   msg.ID,
+				Text:        book.FormatCard(),
+				ReplyMarkup: bookCardKeyboard(book),
+			}); editErr != nil && !strings.Contains(editErr.Error(), "message is not modified") {
+				b.logger.ErrorContext(ctx, "failed to update book card after joining queue", slog.Any("error", editErr))
+			}
 		}
 	}
 }

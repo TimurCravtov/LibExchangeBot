@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	tgbot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -111,8 +112,29 @@ func (b *Bot) respondOrEditCallback(
 		)
 	}
 
+	if update.CallbackQuery.InlineMessageID != "" {
+		if _, err := client.EditMessageText(ctx, &tgbot.EditMessageTextParams{
+			InlineMessageID: update.CallbackQuery.InlineMessageID,
+			Text:            text,
+			ReplyMarkup:     markup,
+		}); err != nil && !strings.Contains(err.Error(), "message is not modified") {
+			b.logger.ErrorContext(ctx, "failed to edit inline callback message",
+				slog.String("inline_message_id", update.CallbackQuery.InlineMessageID),
+				slog.Any("error", err),
+			)
+		}
+		return
+	}
+
 	msg := update.CallbackQuery.Message.Message
 	if msg == nil {
+		if update.CallbackQuery.From.ID != 0 {
+			_, _ = client.SendMessage(ctx, &tgbot.SendMessageParams{
+				ChatID:      update.CallbackQuery.From.ID,
+				Text:        text,
+				ReplyMarkup: markup,
+			})
+		}
 		return
 	}
 
@@ -123,17 +145,41 @@ func (b *Bot) respondOrEditCallback(
 		ReplyMarkup: markup,
 	})
 	if err != nil {
-		b.logger.ErrorContext(ctx, "failed to edit callback message",
+		if strings.Contains(err.Error(), "message is not modified") {
+			return
+		}
+		b.logger.WarnContext(ctx, "edit callback message failed, sending new message",
 			slog.Int64("chat_id", msg.Chat.ID),
 			slog.Int("message_id", msg.ID),
 			slog.Any("error", err),
 		)
+		if _, sendErr := client.SendMessage(ctx, &tgbot.SendMessageParams{
+			ChatID:      msg.Chat.ID,
+			Text:        text,
+			ReplyMarkup: markup,
+		}); sendErr != nil {
+			b.logger.ErrorContext(ctx, "failed to send fallback callback message",
+				slog.Int64("chat_id", msg.Chat.ID),
+				slog.Any("error", sendErr),
+			)
+		}
 	}
 }
 
 func (b *Bot) handleDefault(ctx context.Context, client *tgbot.Bot, update *models.Update) {
 	if update.InlineQuery != nil {
 		b.handleInlineSearch(ctx, client, update.InlineQuery)
+		return
+	}
+
+	if update.CallbackQuery != nil {
+		b.respondOrEditCallback(
+			ctx,
+			client,
+			update,
+			"🔄 Бот был обновлён или перезапущен. Пожалуйста, выберите действие в главном меню (или нажмите /start):",
+			mainMenuKeyboard(),
+		)
 		return
 	}
 
@@ -146,8 +192,9 @@ func (b *Bot) handleDefault(ctx context.Context, client *tgbot.Bot, update *mode
 	}
 
 	_, err := client.SendMessage(ctx, &tgbot.SendMessageParams{
-		ChatID: update.Message.Chat.ID,
-		Text:   "Неизвестная команда. Используйте /start для открытия главного меню.",
+		ChatID:      update.Message.Chat.ID,
+		Text:        "Используйте кнопки меню ниже или команду /start:",
+		ReplyMarkup: mainMenuKeyboard(),
 	})
 	if err != nil {
 		b.logger.ErrorContext(ctx, "failed to send default response",
